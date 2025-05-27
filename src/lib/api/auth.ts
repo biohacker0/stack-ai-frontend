@@ -1,0 +1,25 @@
+import { apiRequest } from "./client";
+
+// Get credentials from environment variables
+const CREDENTIALS = {
+  email: process.env.NEXT_PUBLIC_AUTH_EMAIL,
+  password: process.env.NEXT_PUBLIC_AUTH_PASSWORD,
+};
+
+console.log(`Auth credentials: ${CREDENTIALS.email ? "defined" : "not defined"}`);
+console.log("email:", CREDENTIALS.email, "password:", CREDENTIALS.password);
+
+export async function login() {
+  if (!CREDENTIALS.email || !CREDENTIALS.password) {
+    throw new Error("Auth credentials are not defined in environment variables");
+  }
+
+  return apiRequest("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(CREDENTIALS),
+  });
+}
+
+export async function checkAuthStatus() {
+  return apiRequest("/auth/status");
+}
