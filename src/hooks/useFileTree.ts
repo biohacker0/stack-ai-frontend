@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listResources } from "@/lib/api/connections";
 import { listKBResourcesSafe } from "@/lib/api/knowledgeBase";
 import { FileItem } from "@/lib/types/file";
+import { toast } from 'react-toastify';
 
 interface UseFileTreeProps {
   kbId?: string | null;
@@ -16,6 +17,7 @@ const POLL_INTERVAL = 3000; // 3 seconds
 export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
+  const [errorToastShown, setErrorToastShown] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   // Fetch root files
@@ -88,7 +90,7 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
       const cacheKey = ["drive-files", folderId];
       const cachedData = queryClient.getQueryData<{ data: FileItem[] }>(cacheKey);
 
-      if (!cachedData?.data) return { updatedFiles: [], hasPending: false };
+      if (!cachedData?.data) return { updatedFiles: [], hasPending: false, hasErrors: false };
 
       const updatedFiles = cachedData.data.map((file) => ({
         ...file,
@@ -98,8 +100,9 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
       queryClient.setQueryData(cacheKey, { data: updatedFiles });
 
       const hasPending = updatedFiles.some((file) => file.type === "file" && file.status === "pending");
+      const hasErrors = updatedFiles.some((file) => file.type === "file" && file.status === "error");
 
-      return { updatedFiles, hasPending };
+      return { updatedFiles, hasPending, hasErrors };
     },
     [queryClient]
   );
@@ -115,14 +118,26 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
           // Continue polling
           setTimeout(() => pollFolderStatus(folderPath, folderId), POLL_INTERVAL);
         } else {
-          // Final update
-          updateCachedFilesWithStatus(folderId, freshStatus);
+          // Final update and check for errors
+          const { hasErrors } = updateCachedFilesWithStatus(folderId, freshStatus);
+          
+          // Show error toast if errors found and not already shown for this folder
+          if (hasErrors && !errorToastShown.has(folderId)) {
+            setErrorToastShown(prev => new Set(prev).add(folderId));
+            toast.error(
+              `Some files in this folder failed to index. The knowledge base may be corrupted. Please create a new knowledge base.`,
+              {
+                autoClose: 8000,
+                toastId: `folder-error-${folderId}`
+              }
+            );
+          }
         }
       } catch (error) {
         console.error(`Error polling folder ${folderPath}:`, error);
       }
     },
-    [fetchKBStatusForFolder, updateCachedFilesWithStatus]
+    [fetchKBStatusForFolder, updateCachedFilesWithStatus, errorToastShown]
   );
 
   // Toggle folder expansion
@@ -152,7 +167,19 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
           const folderPath = getFolderPath(driveFiles);
           const kbStatusMap = await fetchKBStatusForFolder(folderPath);
 
-          const { hasPending } = updateCachedFilesWithStatus(folderId, kbStatusMap);
+          const { hasPending, hasErrors } = updateCachedFilesWithStatus(folderId, kbStatusMap);
+
+          // Show error toast immediately if errors found and not already shown
+          if (hasErrors && !errorToastShown.has(folderId)) {
+            setErrorToastShown(prev => new Set(prev).add(folderId));
+            toast.error(
+              `Some files in this folder failed to index. The knowledge base may be corrupted. Please create a new knowledge base.`,
+              {
+                autoClose: 8000,
+                toastId: `folder-error-${folderId}`
+              }
+            );
+          }
 
           // Start polling if there are pending files
           if (hasPending) {
@@ -171,7 +198,7 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         });
       }
     },
-    [expandedFolders, fetchFolderContents, kbId, getFolderPath, fetchKBStatusForFolder, updateCachedFilesWithStatus, pollFolderStatus]
+    [expandedFolders, fetchFolderContents, kbId, getFolderPath, fetchKBStatusForFolder, updateCachedFilesWithStatus, pollFolderStatus, errorToastShown]
   );
 
   // Build hierarchical file tree
@@ -235,6 +262,7 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
   const collapseAllFolders = useCallback(() => {
     setExpandedFolders(new Set());
     setLoadingFolders(new Set());
+    setErrorToastShown(new Set()); // Reset error toast tracking
   }, []);
 
   return {

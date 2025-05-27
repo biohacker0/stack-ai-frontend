@@ -25,5 +25,9 @@ export function FileStatusCell({ file, isFileDeleting }: FileStatusCellProps) {
     return <span className="text-red-600 font-medium">🗑️ Deleting...</span>;
   }
 
+  if (status === "error") {
+    return <span className="text-red-600 font-medium">❌ Failed</span>;
+  }
+
   return <span className="text-gray-400">-</span>;
 } 

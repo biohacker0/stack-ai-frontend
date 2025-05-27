@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, useMemo } from "react";
 import { listKBResources } from "@/lib/api/knowledgeBase";
 import { FileItem } from "@/lib/types/file";
+import { toast } from 'react-toastify';
 
 interface UseKnowledgeBaseStatusProps {
   kbId: string | null;
@@ -15,6 +16,7 @@ const MAX_POLL_DURATION = 2 * 60 * 1000; // 2 minutes
 export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBaseStatusProps) {
   const [shouldPoll, setShouldPoll] = useState(true);
   const [pollingStartTime] = useState(Date.now());
+  const [hasShownErrorToast, setHasShownErrorToast] = useState(false);
 
   // Poll KB resources
   const {
@@ -51,8 +53,21 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
       return;
     }
 
-    // Check for unsettled files
+    // Check for unsettled files (pending or pending_delete)
     const hasUnsettledFiles = files.some((file) => file.status === "pending" || file.status === "pending_delete");
+
+    // Check for error files and show toast if not already shown
+    const errorFiles = files.filter((file) => file.status === "error");
+    if (errorFiles.length > 0 && !hasShownErrorToast) {
+      setHasShownErrorToast(true);
+      toast.error(
+        `Failed to index ${errorFiles.length} file(s). The knowledge base may be corrupted. Please create a new knowledge base.`,
+        {
+          autoClose: 8000,
+          toastId: 'kb-error-toast' // Prevent duplicate toasts
+        }
+      );
+    }
 
     // Check polling timeout
     const pollingDuration = Date.now() - pollingStartTime;
@@ -61,11 +76,12 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
       return;
     }
 
-    // Continue polling even if root files are settled (for nested files)
-    if (!hasUnsettledFiles && pollingDuration < MAX_POLL_DURATION) {
-      // Keep polling for potential nested files
+    // Stop polling if all files are settled (indexed, error, or deleted)
+    if (!hasUnsettledFiles) {
+      setShouldPoll(false);
+      return;
     }
-  }, [kbResources, pollingStartTime]);
+  }, [kbResources, pollingStartTime, hasShownErrorToast]);
 
   // Build status map for quick lookups
   const statusMap = useMemo(() => {
@@ -76,19 +92,23 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
     return map;
   }, [kbResources?.data]);
 
-  // Calculate if all files are settled
+  // Calculate if all files are settled (including error status)
   const allFilesSettled = useMemo(() => {
     if (!kbResources?.data) return false;
 
-    return kbResources.data.every((file) => file.status !== "pending" && file.status !== "pending_delete");
+    return kbResources.data.every((file) => 
+      file.status !== "pending" && 
+      file.status !== "pending_delete"
+    );
   }, [kbResources?.data]);
 
-  // Count files by status
+  // Count files by status (including error)
   const statusCounts = useMemo(() => {
     const counts = {
       indexed: 0,
       pending: 0,
       pending_delete: 0,
+      error: 0,
       unknown: 0,
     };
 

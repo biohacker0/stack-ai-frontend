@@ -5,7 +5,7 @@ export interface FileItem {
   type: "file" | "directory";
   size: number;
   mime_type?: string;
-  status?: "indexed" | "pending" | "pending_delete" | "unknown";
+  status?: "indexed" | "pending" | "pending_delete" | "unknown" | "failed" | "deleted" | "error";
   indexed_at?: string;
   // UI state
   isSelected?: boolean;
