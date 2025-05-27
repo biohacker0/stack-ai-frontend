@@ -90,10 +90,6 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
         return;
       }
 
-      console.log(
-        `Deleting ${uniqueFiles.length} files:`,
-        uniqueFiles.map((f) => f.name)
-      );
       setIsDeleting(true);
       deleteFilesMutation.mutate(uniqueFiles);
     },

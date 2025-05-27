@@ -3,7 +3,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 if (!API_BASE_URL) {
   console.warn("NEXT_PUBLIC_API_BASE_URL is not defined. Using default API base URL.");
 }
-console.log(`API_BASE_URL: ${API_BASE_URL}`);
 
 // Basic fetch wrapper with error handling
 export async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
