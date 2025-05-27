@@ -6,9 +6,6 @@ const CREDENTIALS = {
   password: process.env.NEXT_PUBLIC_AUTH_PASSWORD,
 };
 
-console.log(`Auth credentials: ${CREDENTIALS.email ? "defined" : "not defined"}`);
-console.log("email:", CREDENTIALS.email, "password:", CREDENTIALS.password);
-
 export async function login() {
   if (!CREDENTIALS.email || !CREDENTIALS.password) {
     throw new Error("Auth credentials are not defined in environment variables");
