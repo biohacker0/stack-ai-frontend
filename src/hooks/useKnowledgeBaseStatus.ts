@@ -10,7 +10,7 @@ interface UseKnowledgeBaseStatusProps {
 }
 
 // Constants
-const POLL_INTERVAL = 3000; // 3 seconds
+const POLL_INTERVAL = 1000; // 1 second for faster updates
 const MAX_POLL_DURATION = 2 * 60 * 1000; // 2 minutes
 
 export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBaseStatusProps) {
@@ -35,12 +35,25 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
 
   // Determine if polling should continue
   useEffect(() => {
+    if (!enabled || !kbId) return;
+
+    // If we have no data yet, keep polling
     if (!kbResources?.data) return;
 
     const resources = kbResources.data;
 
-    // Stop if empty KB
+    // Check polling timeout first
+    const pollingDuration = Date.now() - pollingStartTime;
+    if (pollingDuration > MAX_POLL_DURATION) {
+      console.log("Polling timeout reached, stopping polling");
+      setShouldPoll(false);
+      return;
+    }
+
+    // If empty KB (data is empty array), this means all files are deleted or not indexed
+    // We should stop polling in this case
     if (resources.length === 0) {
+      console.log("Empty KB resources, stopping polling");
       setShouldPoll(false);
       return;
     }
@@ -48,16 +61,22 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
     // Filter only files (directories are always "unknown")
     const files = resources.filter((item) => item.type === "file");
 
+    // If no files in KB, stop polling
     if (files.length === 0) {
+      console.log("No files in KB, stopping polling");
       setShouldPoll(false);
       return;
     }
 
     // Check for unsettled files (pending or pending_delete)
-    const hasUnsettledFiles = files.some((file) => file.status === "pending" || file.status === "pending_delete");
-
-    // Check for error files and show toast if not already shown
+    const pendingFiles = files.filter((file) => file.status === "pending");
+    const pendingDeleteFiles = files.filter((file) => file.status === "pending_delete");
     const errorFiles = files.filter((file) => file.status === "error");
+    const indexedFiles = files.filter((file) => file.status === "indexed");
+
+    console.log(`Polling status: ${pendingFiles.length} pending, ${pendingDeleteFiles.length} pending_delete, ${errorFiles.length} error, ${indexedFiles.length} indexed`);
+
+    // Show error toast if not already shown
     if (errorFiles.length > 0 && !hasShownErrorToast) {
       setHasShownErrorToast(true);
       toast.error(
@@ -69,19 +88,26 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
       );
     }
 
-    // Check polling timeout
-    const pollingDuration = Date.now() - pollingStartTime;
-    if (pollingDuration > MAX_POLL_DURATION) {
+    // Continue polling if there are any unsettled files
+    const hasUnsettledFiles = pendingFiles.length > 0 || pendingDeleteFiles.length > 0;
+    
+    if (!hasUnsettledFiles) {
+      console.log("All files settled, stopping polling");
       setShouldPoll(false);
       return;
     }
 
-    // Stop polling if all files are settled (indexed, error, or deleted)
-    if (!hasUnsettledFiles) {
-      setShouldPoll(false);
-      return;
+    // Continue polling
+    console.log("Files still pending, continuing polling...");
+  }, [kbResources, pollingStartTime, hasShownErrorToast, enabled, kbId]);
+
+  // Reset polling when KB changes
+  useEffect(() => {
+    if (kbId) {
+      setShouldPoll(true);
+      setHasShownErrorToast(false);
     }
-  }, [kbResources, pollingStartTime, hasShownErrorToast]);
+  }, [kbId]);
 
   // Build status map for quick lookups
   const statusMap = useMemo(() => {
@@ -96,9 +122,13 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
   const allFilesSettled = useMemo(() => {
     if (!kbResources?.data) return false;
 
-    return kbResources.data.every((file) => 
-      file.status !== "pending" && 
-      file.status !== "pending_delete"
+    const files = kbResources.data.filter((item) => item.type === "file");
+    if (files.length === 0) return true; // No files means settled
+
+    return files.every((file) => 
+      file.status === "indexed" || 
+      file.status === "error"
+      // Note: we don't include pending_delete here because that means deletion is in progress
     );
   }, [kbResources?.data]);
 
@@ -130,5 +160,6 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
     isLoading,
     error,
     refetch,
+    shouldPoll, // Expose for debugging
   };
 }

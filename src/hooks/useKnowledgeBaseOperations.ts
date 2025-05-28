@@ -18,15 +18,16 @@ export function useKnowledgeBaseOperations() {
   const [isCreating, setIsCreating] = useState(false);
   const hasKB = currentKB !== null;
 
-  // Poll KB status after creation
+  // Poll KB status after creation - enable polling when we have a KB
   const {
     statusMap,
     statusCounts,
     allFilesSettled,
     isLoading: isPolling,
+    shouldPoll,
   } = useKnowledgeBaseStatus({
     kbId: currentKB?.id || null,
-    enabled: hasKB && !isCreating, // Only poll when we have a KB and not creating
+    enabled: hasKB, // Always enable polling when we have a KB
   });
 
   // Handle file deletion
@@ -44,14 +45,18 @@ export function useKnowledgeBaseOperations() {
         resource_ids: deduplicatedIds,
       };
 
+      console.log("Creating KB with data:", kbData);
       const kb = await createKnowledgeBase(kbData);
 
+      console.log("KB created, triggering sync:", kb.id);
       // Trigger sync immediately after creation
       await syncKnowledgeBase(kb.id);
 
       return kb;
     },
     onSuccess: (kb) => {
+      console.log("KB creation and sync successful:", kb.id);
+      
       // Save to localStorage
       saveKBToStorage({
         id: kb.id,
@@ -61,6 +66,9 @@ export function useKnowledgeBaseOperations() {
 
       setCurrentKB(kb);
       setIsCreating(false);
+      
+      // Polling will automatically start due to the useKnowledgeBaseStatus hook
+      console.log("Polling should start automatically for KB:", kb.id);
     },
     onError: (error) => {
       console.error("Failed to create KB:", error);
@@ -75,6 +83,7 @@ export function useKnowledgeBaseOperations() {
         return;
       }
 
+      console.log(`Creating KB with ${resourceIds.length} resources`);
       setIsCreating(true);
       createKBMutation.mutate({ resourceIds, files });
     },
@@ -82,6 +91,7 @@ export function useKnowledgeBaseOperations() {
   );
 
   const createNewKB = useCallback(() => {
+    console.log("Creating new KB - clearing storage and reloading");
     // Clear everything and refresh page
     clearKBFromStorage();
     window.location.reload();
@@ -97,6 +107,7 @@ export function useKnowledgeBaseOperations() {
     statusCounts,
     allFilesSettled,
     isPolling,
+    shouldPoll, // Expose for debugging
     // Deletion functions
     isDeleting,
     deleteSelectedFiles,

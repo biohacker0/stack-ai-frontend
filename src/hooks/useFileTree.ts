@@ -12,7 +12,7 @@ interface UseFileTreeProps {
 
 // Constants
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
-const POLL_INTERVAL = 3000; // 3 seconds
+const POLL_INTERVAL = 1000; // 1 second for faster updates
 
 export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -111,8 +111,18 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
   const pollFolderStatus = useCallback(
     async (folderPath: string, folderId: string) => {
       try {
+        console.log(`Polling folder status for: ${folderPath}`);
         const freshStatus = await fetchKBStatusForFolder(folderPath);
-        const stillPending = Array.from(freshStatus.values()).some((status) => status === "pending");
+        
+        // Check if we have any files with status
+        const statusValues = Array.from(freshStatus.values());
+        const pendingFiles = statusValues.filter(status => status === "pending");
+        const pendingDeleteFiles = statusValues.filter(status => status === "pending_delete");
+        
+        console.log(`Folder ${folderPath}: ${pendingFiles.length} pending, ${pendingDeleteFiles.length} pending_delete`);
+
+        // Continue polling if there are still pending files
+        const stillPending = pendingFiles.length > 0 || pendingDeleteFiles.length > 0;
 
         if (stillPending) {
           // Continue polling
@@ -120,6 +130,8 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         } else {
           // Final update and check for errors
           const { hasErrors } = updateCachedFilesWithStatus(folderId, freshStatus);
+          
+          console.log(`Folder ${folderPath} polling complete. Has errors: ${hasErrors}`);
           
           // Show error toast if errors found and not already shown for this folder
           if (hasErrors && !errorToastShown.has(folderId)) {
@@ -165,9 +177,13 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         // Fetch and merge KB status if available
         if (kbId && driveFiles.length > 0) {
           const folderPath = getFolderPath(driveFiles);
+          console.log(`Expanding folder: ${folderPath}`);
+          
           const kbStatusMap = await fetchKBStatusForFolder(folderPath);
 
           const { hasPending, hasErrors } = updateCachedFilesWithStatus(folderId, kbStatusMap);
+
+          console.log(`Folder ${folderPath}: hasPending=${hasPending}, hasErrors=${hasErrors}`);
 
           // Show error toast immediately if errors found and not already shown
           if (hasErrors && !errorToastShown.has(folderId)) {
@@ -183,6 +199,7 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
 
           // Start polling if there are pending files
           if (hasPending) {
+            console.log(`Starting polling for folder: ${folderPath}`);
             setTimeout(() => pollFolderStatus(folderPath, folderId), POLL_INTERVAL);
           }
         }

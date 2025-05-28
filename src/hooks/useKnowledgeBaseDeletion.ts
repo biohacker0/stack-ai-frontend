@@ -17,9 +17,22 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
         try {
           setDeletingFiles((prev) => new Set(prev).add(file.id));
 
-          await deleteKBResource(kbId!, file.name);
-          results.push({ file, success: true });
+          const response = await deleteKBResource(kbId!, file.name);
+          
+          // Check if deletion was successful based on response format
+          const isSuccess = response && 
+            (response.success === true || 
+             (typeof response === 'object' && response.message === "Resource deleted"));
+
+          if (isSuccess) {
+            console.log(`Successfully deleted: ${file.name}`);
+            results.push({ file, success: true });
+          } else {
+            console.error(`Deletion failed for ${file.name}:`, response);
+            results.push({ file, success: false, error: 'Deletion failed' });
+          }
         } catch (error) {
+          console.error(`Error deleting ${file.name}:`, error);
           results.push({ file, success: false, error });
         } finally {
           setDeletingFiles((prev) => {
@@ -36,14 +49,32 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
       const successCount = results.filter((r) => r.success).length;
       const totalCount = results.length;
 
-      // Invalidate all KB-related queries to refresh status
+      console.log(`Deletion complete: ${successCount}/${totalCount} files deleted successfully`);
+
+      // Immediately invalidate and refetch all KB-related queries
       queryClient.invalidateQueries({ queryKey: ["kb-resources"] });
       queryClient.invalidateQueries({ queryKey: ["kb-file-status"] });
 
-      // Clear all drive-files cache to force fresh status checks
+      // Force refetch of root KB resources to get updated status
+      if (kbId) {
+        queryClient.refetchQueries({ queryKey: ["kb-resources", kbId] });
+      }
+
+      // Clear all drive-files cache to force fresh status checks on next expansion
       queryClient.removeQueries({ queryKey: ["drive-files"] });
 
       setIsDeleting(false);
+
+      // Show success message if any files were deleted
+      if (successCount > 0) {
+        console.log(`${successCount} file(s) deleted successfully`);
+      }
+
+      // Show error message if any deletions failed
+      const failedCount = totalCount - successCount;
+      if (failedCount > 0) {
+        console.error(`${failedCount} file(s) failed to delete`);
+      }
     },
     onError: (error) => {
       console.error("Deletion process failed:", error);
@@ -77,19 +108,26 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
           filesToDelete.push(item);
         } else if (item.type === "directory") {
           // Folder selection - find all indexed files inside
-          const indexedFilesInFolder = allFiles.filter((file) => file.type === "file" && file.status === "indexed" && file.name.startsWith(item.name + "/"));
+          const indexedFilesInFolder = allFiles.filter((file) => 
+            file.type === "file" && 
+            file.status === "indexed" && 
+            file.name.startsWith(item.name + "/")
+          );
           filesToDelete.push(...indexedFilesInFolder);
         }
       });
 
       // Remove duplicates
-      const uniqueFiles = filesToDelete.filter((file, index, arr) => arr.findIndex((f) => f.id === file.id) === index);
+      const uniqueFiles = filesToDelete.filter((file, index, arr) => 
+        arr.findIndex((f) => f.id === file.id) === index
+      );
 
       if (uniqueFiles.length === 0) {
         console.warn("No indexed files selected for deletion");
         return;
       }
 
+      console.log(`Starting deletion of ${uniqueFiles.length} files`);
       setIsDeleting(true);
       deleteFilesMutation.mutate(uniqueFiles);
     },
@@ -113,7 +151,11 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
   const canDeleteFolder = useCallback((folder: FileItem, allFiles: FileItem[]) => {
     if (folder.type !== "directory") return false;
 
-    return allFiles.some((file) => file.type === "file" && file.status === "indexed" && file.name.startsWith(folder.name + "/"));
+    return allFiles.some((file) => 
+      file.type === "file" && 
+      file.status === "indexed" && 
+      file.name.startsWith(folder.name + "/")
+    );
   }, []);
 
   return {
