@@ -110,11 +110,24 @@ export function useKnowledgeBaseStatus({ kbId, enabled = true }: UseKnowledgeBas
   }, [kbId]);
 
   // Build status map for quick lookups
+  // IMPORTANT: Only include files that are actually in the KB
+  // Files not in this map will fall back to their default status (which should be "-" for deleted files)
   const statusMap = useMemo(() => {
     const map = new Map<string, string>();
-    kbResources?.data?.forEach((resource) => {
-      map.set(resource.id, resource.status || "unknown");
-    });
+    
+    if (kbResources?.data) {
+      console.log(`Building status map from ${kbResources.data.length} KB resources`);
+      console.log('KB Resources:', kbResources.data.map(r => ({ id: r.id, name: r.name, status: r.status })));
+      
+      kbResources.data.forEach((resource) => {
+        map.set(resource.id, resource.status || "unknown");
+        console.log(`Status map: ${resource.id} (${resource.name}) -> ${resource.status || "unknown"}`);
+      });
+    } else {
+      console.log('No KB resources data available for status map');
+    }
+    
+    console.log(`Final status map has ${map.size} entries`);
     return map;
   }, [kbResources?.data]);
 

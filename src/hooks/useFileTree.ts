@@ -18,6 +18,7 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [errorToastShown, setErrorToastShown] = useState<Set<string>>(new Set());
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Force refresh trigger
   const queryClient = useQueryClient();
 
   // Fetch root files
@@ -97,10 +98,16 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         status: (kbStatusMap.get(file.id) as FileItem["status"]) || file.status,
       }));
 
+      // IMPORTANT: Update the cache immediately so UI reflects changes
       queryClient.setQueryData(cacheKey, { data: updatedFiles });
+      
+      // CRITICAL: Trigger a refresh to force UI update
+      setRefreshTrigger(prev => prev + 1);
 
       const hasPending = updatedFiles.some((file) => file.type === "file" && file.status === "pending");
       const hasErrors = updatedFiles.some((file) => file.type === "file" && file.status === "error");
+
+      console.log(`Updated cache for folder ${folderId}: ${updatedFiles.length} files, hasPending=${hasPending}, hasErrors=${hasErrors}`);
 
       return { updatedFiles, hasPending, hasErrors };
     },
@@ -121,6 +128,9 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         
         console.log(`Folder ${folderPath}: ${pendingFiles.length} pending, ${pendingDeleteFiles.length} pending_delete`);
 
+        // ALWAYS update the cache with fresh status, even if still pending
+        const { hasErrors } = updateCachedFilesWithStatus(folderId, freshStatus);
+
         // Continue polling if there are still pending files
         const stillPending = pendingFiles.length > 0 || pendingDeleteFiles.length > 0;
 
@@ -128,9 +138,6 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
           // Continue polling
           setTimeout(() => pollFolderStatus(folderPath, folderId), POLL_INTERVAL);
         } else {
-          // Final update and check for errors
-          const { hasErrors } = updateCachedFilesWithStatus(folderId, freshStatus);
-          
           console.log(`Folder ${folderPath} polling complete. Has errors: ${hasErrors}`);
           
           // Show error toast if errors found and not already shown for this folder
@@ -236,7 +243,18 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
         }
 
         // Apply KB status - root level uses statusMap, children use cached status
-        const kbStatus = level === 0 ? (statusMap?.get(file.id) as FileItem["status"]) : file.status;
+        let finalStatus: FileItem["status"];
+        
+        if (level === 0) {
+          // Root level: use statusMap if available, otherwise undefined (which will show as "-")
+          const kbStatus = statusMap?.get(file.id) as FileItem["status"];
+          finalStatus = kbStatus; // Don't fall back to file.status for root level
+          
+          console.log(`Root file ${file.id}: statusMap has ${kbStatus ? kbStatus : 'no status'}, final: ${finalStatus || 'undefined'}`);
+        } else {
+          // Nested files: use cached status from folder expansion
+          finalStatus = file.status;
+        }
 
         return {
           ...file,
@@ -244,17 +262,17 @@ export function useFileTree({ kbId, statusMap }: UseFileTreeProps = {}) {
           isLoading,
           children,
           level,
-          status: kbStatus || file.status,
+          status: finalStatus,
         };
       });
     },
-    [expandedFolders, loadingFolders, queryClient, statusMap]
+    [expandedFolders, loadingFolders, queryClient, statusMap, refreshTrigger]
   );
 
   // Build file tree from root data
   const fileTree = useMemo(() => {
     return rootData?.data ? buildFileTree(rootData.data) : [];
-  }, [rootData?.data, buildFileTree]);
+  }, [rootData?.data, buildFileTree, refreshTrigger]);
 
   // Flatten tree for table display
   const flattenTree = useCallback((tree: FileItem[]): FileItem[] => {

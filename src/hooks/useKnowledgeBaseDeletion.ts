@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { deleteKBResource } from "@/lib/api/knowledgeBase";
 import { FileItem } from "@/lib/types/file";
+import { listResources } from "@/lib/api/connections";
+import { listKBResources } from "@/lib/api/knowledgeBase";
 
 export function useKnowledgeBaseDeletion(kbId: string | null) {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -45,23 +47,39 @@ export function useKnowledgeBaseDeletion(kbId: string | null) {
 
       return results;
     },
-    onSuccess: (results) => {
+    onSuccess: async (results) => {
       const successCount = results.filter((r) => r.success).length;
       const totalCount = results.length;
 
       console.log(`Deletion complete: ${successCount}/${totalCount} files deleted successfully`);
 
-      // Immediately invalidate and refetch all KB-related queries
-      queryClient.invalidateQueries({ queryKey: ["kb-resources"] });
-      queryClient.invalidateQueries({ queryKey: ["kb-file-status"] });
+      // STEP 1: Immediately invalidate and remove all KB-related queries
+      queryClient.removeQueries({ queryKey: ["kb-resources"] });
+      queryClient.removeQueries({ queryKey: ["kb-file-status"] });
 
-      // Force refetch of root KB resources to get updated status
+      // STEP 2: Remove all cached drive files 
+      queryClient.removeQueries({ queryKey: ["drive-files"] });
+
+      // STEP 3: Wait a moment for backend to process, then refetch KB resources
       if (kbId) {
-        queryClient.refetchQueries({ queryKey: ["kb-resources", kbId] });
+        console.log("Waiting for backend to process deletion...");
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+        
+        console.log("Refetching KB resources after deletion...");
+        await queryClient.fetchQuery({
+          queryKey: ["kb-resources", kbId],
+          queryFn: () => listKBResources(kbId),
+          staleTime: 0, // Force fresh fetch
+        });
       }
 
-      // Clear all drive-files cache to force fresh status checks on next expansion
-      queryClient.removeQueries({ queryKey: ["drive-files"] });
+      // STEP 4: Finally refetch root drive files
+      console.log("Refetching root drive files...");
+      await queryClient.fetchQuery({
+        queryKey: ["drive-files", "root"],
+        queryFn: () => listResources(),
+        staleTime: 0, // Force fresh fetch
+      });
 
       setIsDeleting(false);
 
